@@ -1,7 +1,6 @@
 """
-Simple Quotex Telegram Signal Bot (Educational)
-Uses pyquotex for real candle data + RSI strategy
-Always use DEMO account first!
+Simple Quotex Telegram Signal Bot (Multiple Pairs)
+Educational - Always use DEMO first!
 """
 
 import asyncio
@@ -10,12 +9,24 @@ import requests
 from pyquotex.stable_api import Quotex
 
 # ============ SETTINGS ============
-EMAIL = "your_quotex_email@gmail.com"      # Quotex ডেমো অ্যাকাউন্ট ইমেইল
-PASSWORD = "your_password"                  # পাসওয়ার্ড
-TELEGRAM_TOKEN = "YOUR_BOT_TOKEN"           # @BotFather থেকে পাওয়া টোকেন
-CHAT_ID = "YOUR_CHAT_ID"                    # আপনার Telegram Chat ID (অথবা চ্যানেল ID)
-SYMBOL = "EURUSD_otc"                       # পেয়ার (যেমন GBPUSD_otc, USDJPY_otc)
-PERIOD = 60                                 # ১ মিনিট ক্যান্ডল
+EMAIL = "shahinalampsu@gmail.com"
+PASSWORD = "M*y725626"                  # আপনার পাসওয়ার্ড বসান
+TELEGRAM_TOKEN = "8911990505:AAGjJnyAMyaUu4Ufl95Y1zPUm7-UUGvWee4"
+CHAT_ID = "7128688603"
+
+# এখানে যেসব পেয়ার চাইবেন যোগ করুন
+SYMBOLS = [
+    "EURUSD_otc",
+    "GBPUSD_otc",
+    "USDJPY_otc",
+    "AUDUSD_otc",
+    "USDCAD_otc",
+    "NZDUSD_otc",
+    "EURJPY_otc",
+    "GBPJPY_otc",
+]
+
+PERIOD = 60
 # ==================================
 
 def calc_rsi(closes, period=14):
@@ -43,64 +54,64 @@ def send_telegram(message):
     payload = {"chat_id": CHAT_ID, "text": message, "parse_mode": "HTML"}
     try:
         requests.post(url, json=payload, timeout=10)
-        print("Signal sent to Telegram")
+        print("Signal sent")
     except Exception as e:
         print("Telegram error:", e)
 
+async def check_pair(client, symbol):
+    try:
+        candles = await client.get_candles(symbol, time.time(), 3600, PERIOD)
+        if not candles or len(candles) < 20:
+            return None
+
+        closes = [float(c["close"]) for c in candles]
+        rsi = calc_rsi(closes)
+        if rsi is None:
+            return None
+
+        signal = None
+        if rsi < 30:
+            signal = "CALL 🔼"
+        elif rsi > 70:
+            signal = "PUT 🔽"
+
+        if signal:
+            current_time = time.strftime("%H:%M:%S")
+            msg = (
+                f"<b>Quotex Signal</b>\n"
+                f"Pair: <b>{symbol}</b>\n"
+                f"Time: {current_time}\n"
+                f"Signal: <b>{signal}</b>\n"
+                f"RSI: {rsi:.1f}\n"
+                f"Expiry: 1 Minute"
+            )
+            print(f"{symbol} -> {signal} (RSI: {rsi:.1f})")
+            send_telegram(msg)
+            return signal
+        else:
+            print(f"{symbol} RSI: {rsi:.1f} - No signal")
+            return None
+    except Exception as e:
+        print(f"Error on {symbol}:", e)
+        return None
+
 async def main():
     client = Quotex(email=EMAIL, password=PASSWORD)
-    client.account_is_demo = 1  # ডেমো মোড
+    client.account_is_demo = 1
     print("Connecting to Quotex...")
     ok, reason = await client.connect()
     if not ok:
         print("Connection failed:", reason)
         return
 
-    print(f"Connected! Monitoring {SYMBOL}...")
-    last_signal = None
+    print(f"Connected! Monitoring {len(SYMBOLS)} pairs...")
 
     while True:
-        try:
-            candles = await client.get_candles(SYMBOL, time.time(), 3600, PERIOD)
-            if not candles or len(candles) < 20:
-                await asyncio.sleep(10)
-                continue
-
-            closes = [float(c["close"]) for c in candles]
-            rsi = calc_rsi(closes)
-
-            if rsi is None:
-                await asyncio.sleep(5)
-                continue
-
-            current_time = time.strftime("%H:%M:%S")
-            signal = None
-
-            if rsi < 30:
-                signal = "CALL 🔼 (RSI Oversold)"
-            elif rsi > 70:
-                signal = "PUT 🔽 (RSI Overbought)"
-
-            if signal and signal != last_signal:
-                msg = (
-                    f"<b>Quotex Signal</b>\n"
-                    f"Pair: {SYMBOL}\n"
-                    f"Time: {current_time}\n"
-                    f"Signal: <b>{signal}</b>\n"
-                    f"RSI: {rsi:.1f}\n"
-                    f"Expiry: 1 Minute"
-                )
-                print(msg.replace("<b>", "").replace("</b>", ""))
-                send_telegram(msg)
-                last_signal = signal
-            else:
-                print(f"[{current_time}] RSI: {rsi:.1f} - No signal")
-
-            await asyncio.sleep(30)  # প্রতি ৩০ সেকেন্ডে চেক
-
-        except Exception as e:
-            print("Error:", e)
-            await asyncio.sleep(10)
+        for symbol in SYMBOLS:
+            await check_pair(client, symbol)
+            await asyncio.sleep(2)  # পেয়ারগুলোর মধ্যে একটু গ্যাপ
+        print("--- Checking again in 30 seconds ---")
+        await asyncio.sleep(30)
 
     await client.close()
 
