@@ -1,33 +1,18 @@
-"""
-Simple Quotex Telegram Signal Bot (Multiple Pairs)
-Educational - Always use DEMO first!
-"""
-
 import asyncio
 import time
 import requests
+import os
 from pyquotex.stable_api import Quotex
 
-# ============ SETTINGS ============
-EMAIL = "shahinalampsu@gmail.com"
-PASSWORD = "M*y725626"                  # আপনার পাসওয়ার্ড বসান
-TELEGRAM_TOKEN = "8911990505:AAGjJnyAMyaUu4Ufl95Y1zPUm7-UUGvWee4"
-CHAT_ID = "7128688603"
+# Environment Variables থেকে নেবে
+EMAIL = os.getenv("EMAIL", "shahinalampsu@gmail.com")
+PASSWORD = os.getenv("PASSWORD", "M*y725626")
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "8911990505:AAGjJnyAMyaUu4Ufl95Y1zPUm7-UUGvWee4")
+CHAT_ID = os.getenv("CHAT_ID", "7128688603")
 
-# এখানে যেসব পেয়ার চাইবেন যোগ করুন
-SYMBOLS = [
-    "EURUSD_otc",
-    "GBPUSD_otc",
-    "USDJPY_otc",
-    "AUDUSD_otc",
-    "USDCAD_otc",
-    "NZDUSD_otc",
-    "EURJPY_otc",
-    "GBPJPY_otc",
-]
-
+SYMBOLS = ["EURUSD_otc", "GBPUSD_otc", "USDJPY_otc", "AUDUSD_otc"]
 PERIOD = 60
-# ==================================
+last_signals = {}
 
 def calc_rsi(closes, period=14):
     if len(closes) < period + 1:
@@ -51,10 +36,13 @@ def calc_rsi(closes, period=14):
 
 def send_telegram(message):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = {"chat_id": CHAT_ID, "text": message, "parse_mode": "HTML"}
     try:
-        requests.post(url, json=payload, timeout=10)
-        print("Signal sent")
+        requests.post(url, json={
+            "chat_id": CHAT_ID,
+            "text": message,
+            "parse_mode": "HTML"
+        }, timeout=10)
+        print("Telegram sent")
     except Exception as e:
         print("Telegram error:", e)
 
@@ -62,58 +50,72 @@ async def check_pair(client, symbol):
     try:
         candles = await client.get_candles(symbol, time.time(), 3600, PERIOD)
         if not candles or len(candles) < 20:
-            return None
+            print(f"{symbol}: Not enough candles")
+            return
 
         closes = [float(c["close"]) for c in candles]
         rsi = calc_rsi(closes)
         if rsi is None:
-            return None
+            return
 
+        current_time = time.strftime("%H:%M:%S")
         signal = None
-        if rsi < 30:
-            signal = "CALL 🔼"
-        elif rsi > 70:
-            signal = "PUT 🔽"
 
-        if signal:
-            current_time = time.strftime("%H:%M:%S")
+        if rsi < 30:
+            signal = "CALL 🔼 (RSI Oversold)"
+        elif rsi > 70:
+            signal = "PUT 🔽 (RSI Overbought)"
+
+        if signal and last_signals.get(symbol) != signal:
             msg = (
                 f"<b>Quotex Signal</b>\n"
-                f"Pair: <b>{symbol}</b>\n"
+                f"Pair: {symbol}\n"
                 f"Time: {current_time}\n"
                 f"Signal: <b>{signal}</b>\n"
                 f"RSI: {rsi:.1f}\n"
                 f"Expiry: 1 Minute"
             )
-            print(f"{symbol} -> {signal} (RSI: {rsi:.1f})")
+            print(msg)
             send_telegram(msg)
-            return signal
+            last_signals[symbol] = signal
         else:
-            print(f"{symbol} RSI: {rsi:.1f} - No signal")
-            return None
+            print(f"[{current_time}] {symbol} RSI: {rsi:.1f}")
+
     except Exception as e:
-        print(f"Error on {symbol}:", e)
-        return None
+        print(f"Error {symbol}: {e}")
 
 async def main():
-    client = Quotex(email=EMAIL, password=PASSWORD)
-    client.account_is_demo = 1
-    print("Connecting to Quotex...")
-    ok, reason = await client.connect()
-    if not ok:
-        print("Connection failed:", reason)
+    print("Starting bot...")
+    print(f"Email: {EMAIL}")
+
+    hosts = ["qxbroker.com", "quotex.com"]
+    client = None
+
+    for host in hosts:
+        try:
+            print(f"Trying host: {host}")
+            client = Quotex(email=EMAIL, password=PASSWORD, host=host)
+            ok, reason = await client.connect()
+            if ok:
+                print(f"Connected successfully with {host}")
+                break
+            else:
+                print(f"Connection failed on {host}: {reason}")
+                client = None
+        except Exception as e:
+            print(f"Error connecting to {host}: {e}")
+            client = None
+
+    if client is None:
+        print("Could not connect to Quotex. Exiting.")
         return
 
-    print(f"Connected! Monitoring {len(SYMBOLS)} pairs...")
-
+    print("Bot is running...")
     while True:
         for symbol in SYMBOLS:
             await check_pair(client, symbol)
-            await asyncio.sleep(2)  # পেয়ারগুলোর মধ্যে একটু গ্যাপ
-        print("--- Checking again in 30 seconds ---")
+            await asyncio.sleep(2)
         await asyncio.sleep(30)
-
-    await client.close()
 
 if __name__ == "__main__":
     asyncio.run(main())
