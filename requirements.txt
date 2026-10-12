@@ -1,2 +1,2 @@
-requests
-git+https://github.com/cleitonleonel/pyquotex.git
+python-telegram-bot>=21.0,<23.0
+openai>=1.68.0
